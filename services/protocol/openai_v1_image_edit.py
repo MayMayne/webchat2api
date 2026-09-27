@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+from typing import Any, Iterator
+
+from services.providers.base import ConversationRequest, GROK_PROVIDER, ImageGenerationError
+from services.providers.registry import image_edit_outputs, resolve_model
+from services.protocol.conversation import collect_image_outputs, encode_images, stream_image_chunks
+
+
+def handle(body: dict[str, Any]) -> dict[str, Any] | Iterator[dict[str, Any]]:
+    prompt = str(body.get("prompt") or "")
+    images = body.get("images") or []
+    model = str(body.get("model") or "gpt-image-2")
+    n = int(body.get("n") or 1)
+    size = body.get("size")
+    response_format = str(body.get("response_format") or "b64_json")
+    base_url = str(body.get("base_url") or "") or None
+    spec = resolve_model(model)
+    if spec.provider == GROK_PROVIDER:
+        outputs = image_edit_outputs(spec, None, body=body, prompt=prompt, images=images, n=n, size=size)
+        if body.get("stream"):
+            return stream_image_chunks(outputs)
+        return collect_image_outputs(outputs)
+    encoded_images = encode_images(images)
+    if not encoded_images:
+        raise ImageGenerationError("image is required")
+    request = ConversationRequest(
+        prompt=prompt,
+        model=model,
+        n=n,
+        size=size,
+        response_format=response_format,
+        base_url=base_url,
+        images=encoded_images,
+        message_as_error=True,
+    )
+    outputs = image_edit_outputs(spec, request, body=body, prompt=prompt, images=images, n=n, size=size)
+    if body.get("stream"):
+        return stream_image_chunks(outputs)
+    return collect_image_outputs(outputs)
